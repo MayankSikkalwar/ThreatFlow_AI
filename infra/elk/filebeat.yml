@@ -1,0 +1,42 @@
+# Filebeat is used instead of sending logs to Kafka directly from the generator so the system keeps
+# local append-only log files in /logs/*.log while delegating tailing and transport to a dedicated shipper.
+#
+# The generator already writes @timestamp in each JSON line, which Elasticsearch and Kibana both expect
+# for correct time-based indexing and visualization.
+
+filebeat.inputs:
+  - type: filestream
+    id: siem-local-log-files
+    enabled: true
+    paths:
+      - /logs/*.log
+    parsers:
+      # Each line is a complete JSON event produced by the generator.
+      - ndjson:
+          target: ""
+          overwrite_keys: true
+
+processors:
+  # Keep the payload aligned with the Phase 2 schema by removing Filebeat metadata fields.
+  - drop_fields:
+      fields:
+        - agent
+        - ecs
+        - host
+        - input
+        - log
+      ignore_missing: true
+
+name: siem-filebeat
+publisher_pipeline.disable_host: true
+
+output.kafka:
+  # Filebeat ships the generator's JSON logs into Kafka, which buffers traffic before Logstash processes it.
+  hosts: ["kafka:29092"]
+  topic: "raw-logs"
+  required_acks: 1
+  compression: gzip
+  codec.json:
+    pretty: false
+
+logging.level: info
